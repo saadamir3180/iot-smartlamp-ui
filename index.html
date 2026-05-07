@@ -219,7 +219,7 @@
 <script>
   const BROKER_URL = 'wss://9f61f9172dc041969707a62df5d0c6cb.s1.eu.hivemq.cloud:8884/mqtt';
   const MQTT_USER  = 'demoo';
-  const MQTT_PASS  = 'Demoo12345';
+  const MQTT_PASS  = 'Demo12345';
   const WATT       = 11;      // lamp wattage
   const RS_PER_KWH = 50;      // electricity cost Rs/kWh in Pakistan
 
@@ -275,11 +275,21 @@
 
     mqttClient.on('error', (e) => {
       setConnected(false);
-      addLog('system', 'Connection error: ' + e.message);
+      addLog('system', 'Error: ' + e.message);
+      console.error('MQTT Error:', e);
     });
 
     mqttClient.on('offline', () => {
       setConnected(false);
+      addLog('system', 'Broker is offline');
+    });
+
+    mqttClient.on('reconnect', () => {
+      addLog('system', 'Attempting to reconnect...');
+    });
+
+    mqttClient.on('close', () => {
+      addLog('system', 'Connection closed');
     });
 
     mqttClient.on('message', (topic, payload) => {
