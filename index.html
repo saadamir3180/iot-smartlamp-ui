@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lexora Smart Lamp — Control Dashboard</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0c0f;
+    --surface: #111318;
+    --surface2: #181c24;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.13);
+    --text: #e8eaf0;
+    --muted: #6b7280;
+    --accent: #22d3a5;
+    --accent2: #0f8060;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  /* subtle grid bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(34,211,165,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34,211,165,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+  /* header */
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .logo-name { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent); letter-spacing: 0.1em; }
+  .logo-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .conn-badge { font-family: var(--mono); font-size: 11px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border2); color: var(--muted); transition: all 0.3s; }
+  .conn-badge.connected { color: var(--accent); border-color: var(--accent2); background: rgba(34,211,165,0.06); }
+  .conn-badge.error { color: var(--danger); border-color: var(--danger); }
+
+  /* grid layouts */
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 720px) { .grid-3, .grid-2 { grid-template-columns: 1fr; } }
+
+  /* cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+    transition: border-color 0.3s;
+  }
+  .card:hover { border-color: var(--border2); }
+  .card-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  .card-value { font-size: 32px; font-weight: 300; color: var(--text); line-height: 1; }
+  .card-unit { font-size: 13px; color: var(--muted); margin-left: 4px; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  /* lux bar */
+  .lux-bar-track { height: 4px; background: var(--surface2); border-radius: 2px; margin-top: 12px; overflow: hidden; }
+  .lux-bar-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width 0.6s ease; }
+
+  /* PIR status */
+  .pir-status { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .pir-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); transition: all 0.4s; }
+  .pir-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .pir-text { font-family: var(--mono); font-size: 12px; color: var(--muted); transition: color 0.4s; }
+  .pir-text.active { color: var(--accent); }
+
+  /* prediction bar */
+  .prob-track { height: 6px; background: var(--surface2); border-radius: 3px; margin-top: 14px; overflow: hidden; }
+  .prob-fill { height: 100%; border-radius: 3px; background: var(--warn); transition: width 0.8s ease; }
+  .prob-fill.high { background: var(--accent); }
+  .alert-badge { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 3px 10px; border-radius: 20px; margin-top: 10px; background: rgba(34,211,165,0.1); color: var(--accent); border: 1px solid var(--accent2); opacity: 0; transition: opacity 0.4s; }
+  .alert-badge.visible { opacity: 1; }
+
+  /* override button */
+  .override-section { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; }
+  .override-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .override-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; margin-bottom: 14px; }
+  .btn { font-family: var(--mono); font-size: 12px; padding: 10px 28px; border-radius: 8px; border: 1px solid var(--border2); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.2s; letter-spacing: 0.05em; }
+  .btn:hover { background: var(--surface2); color: var(--text); }
+  .btn.on { border-color: var(--accent); color: var(--accent); background: rgba(34,211,165,0.08); }
+  .btn.off { border-color: var(--danger); color: var(--danger); background: rgba(239,68,68,0.08); }
+  .lamp-state { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .lamp-state span { color: var(--accent); }
+  .lamp-state span.off-state { color: var(--danger); }
+
+  /* energy card */
+  .energy-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .energy-row:last-child { border-bottom: none; }
+  .energy-key { font-size: 12px; color: var(--muted); }
+  .energy-val { font-family: var(--mono); font-size: 13px; color: var(--text); }
+
+  /* chart card */
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; }
+  .chart-wrap { position: relative; height: 180px; margin-top: 14px; }
+
+  /* log feed */
+  .log-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; }
+  .log-feed { font-family: var(--mono); font-size: 11px; color: var(--muted); max-height: 160px; overflow-y: auto; margin-top: 10px; }
+  .log-line { padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .log-line:last-child { border-bottom: none; }
+  .log-time { color: var(--muted); margin-right: 8px; }
+  .log-topic { color: var(--accent2); margin-right: 6px; }
+
+  /* footer */
+  footer { margin-top: 40px; text-align: center; font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.08em; }
+  footer span { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">
+      <div class="logo-dot" id="connDot"></div>
+      <div>
+        <div class="logo-name">SMART DESK LAMP</div>
+        <div class="logo-sub">IoT Control Dashboard — BSE-8A</div>
+      </div>
+    </div>
+    <div class="conn-badge" id="connBadge">Connecting...</div>
+  </header>
+
+  <!-- Row 1: sensor cards -->
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-label">Ambient Light</div>
+      <div><span class="card-value" id="luxVal">—</span><span class="card-unit">lux</span></div>
+      <div class="lux-bar-track"><div class="lux-bar-fill" id="luxBar" style="width:0%"></div></div>
+      <div class="card-sub" id="luxDesc">Waiting for sensor...</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Occupancy (PIR)</div>
+      <div class="card-value" id="pirVal">—</div>
+      <div class="pir-status">
+        <div class="pir-dot" id="pirDot"></div>
+        <div class="pir-text" id="pirText">No signal yet</div>
+      </div>
+      <div class="card-sub" id="pirSub">Waiting for sensor...</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Last Updated</div>
+      <div class="card-value" style="font-size:20px;font-weight:400;" id="lastTime">—</div>
+      <div class="card-sub" id="msgCount">0 messages received</div>
+    </div>
+  </div>
+
+  <!-- Row 2: AI prediction + energy -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-label">AI Occupancy Prediction</div>
+      <div><span class="card-value" id="probVal">—</span><span class="card-unit">%</span></div>
+      <div class="prob-track"><div class="prob-fill" id="probBar" style="width:0%"></div></div>
+      <div class="alert-badge" id="alertBadge">Lamp turning ON proactively</div>
+      <div class="card-sub" id="aiSub">Waiting for prediction...</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Energy Summary</div>
+      <div class="energy-row"><span class="energy-key">Lamp on time today</span><span class="energy-val" id="onTime">0 min</span></div>
+      <div class="energy-row"><span class="energy-key">Estimated usage</span><span class="energy-val" id="kwh">0.000 kWh</span></div>
+      <div class="energy-row"><span class="energy-key">Cost estimate</span><span class="energy-val" id="cost">Rs 0.00</span></div>
+      <div class="energy-row"><span class="energy-key">Messages logged</span><span class="energy-val" id="totalMsgs">0</span></div>
+    </div>
+  </div>
+
+  <!-- Manual override -->
+  <div class="override-section">
+    <div class="override-label">Manual Override</div>
+    <div class="override-row">
+      <button class="btn on" onclick="sendCommand('ON')">TURN ON</button>
+      <button class="btn off" onclick="sendCommand('OFF')">TURN OFF</button>
+      <div class="lamp-state">Current state: <span id="lampStateText" class="off-state">OFF</span></div>
+    </div>
+  </div>
+
+  <!-- Usage chart -->
+  <div class="chart-card">
+    <div class="card-label">Hourly usage log (messages received per hour)</div>
+    <div class="chart-wrap"><canvas id="usageChart"></canvas></div>
+  </div>
+
+  <!-- Log feed -->
+  <div class="log-card">
+    <div class="card-label">Live message feed</div>
+    <div class="log-feed" id="logFeed">
+      <div class="log-line"><span class="log-time">--:--:--</span>Waiting for messages...</div>
+    </div>
+  </div>
+
+  <footer>Smart Desk Lamp Controller &nbsp;·&nbsp; <span>HiveMQ</span> · MQTT · Python AI · ESP32 &nbsp;·&nbsp; BSE-8A</footer>
+</div>
+
+<script>
+  const BROKER_URL = 'wss://9f61f9172dc041969707a62df5d0c6cb.s1.eu.hivemq.cloud:8884/mqtt';
+  const MQTT_USER  = 'demoo';
+  const MQTT_PASS  = 'Demoo12345';
+  const WATT       = 11;      // lamp wattage
+  const RS_PER_KWH = 50;      // electricity cost Rs/kWh in Pakistan
+
+  // ── STATE ──
+  let msgCount = 0;
+  let lampOn = false;
+  let lampOnMinutes = 0;
+  let lastLampOnTime = null;
+  let hourlyBuckets = new Array(24).fill(0);
+  let mqttClient = null;
+
+  // ── CHART ──
+  const ctx = document.getElementById('usageChart').getContext('2d');
+  const usageChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:24}, (_,i) => i+'h'),
+      datasets: [{
+        data: hourlyBuckets,
+        backgroundColor: 'rgba(34,211,165,0.25)',
+        borderColor: 'rgba(34,211,165,0.7)',
+        borderWidth: 1,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#6b7280', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#6b7280', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true }
+      }
+    }
+  });
+
+  // ── MQTT CONNECT ──
+  function connect() {
+    mqttClient = mqtt.connect(BROKER_URL, {
+      username: MQTT_USER,
+      password: MQTT_PASS,
+      clientId: 'dashboard_' + Math.random().toString(16).slice(2,8),
+      reconnectPeriod: 3000,
+    });
+
+    mqttClient.on('connect', () => {
+      setConnected(true);
+      mqttClient.subscribe('lamp/sensors');
+      mqttClient.subscribe('lamp/prediction');
+      mqttClient.subscribe('lamp/control');
+      addLog('system', 'Connected to HiveMQ broker');
+    });
+
+    mqttClient.on('error', (e) => {
+      setConnected(false);
+      addLog('system', 'Connection error: ' + e.message);
+    });
+
+    mqttClient.on('offline', () => {
+      setConnected(false);
+    });
+
+    mqttClient.on('message', (topic, payload) => {
+      const raw = payload.toString();
+      msgCount++;
+      addLog(topic, raw);
+      document.getElementById('msgCount').textContent = msgCount + ' messages received';
+      document.getElementById('totalMsgs').textContent = msgCount;
+
+      const hour = new Date().getHours();
+      hourlyBuckets[hour]++;
+      usageChart.data.datasets[0].data = [...hourlyBuckets];
+      usageChart.update('none');
+
+      if (topic === 'lamp/control') {
+        handleControl(raw.trim());
+      } else {
+        try {
+          const data = JSON.parse(raw);
+          if (topic === 'lamp/sensors') handleSensors(data);
+          if (topic === 'lamp/prediction') handlePrediction(data);
+        } catch(e) {
+          console.error("JSON Parse Error:", e);
+        }
+      }
+    });
+  }
+
+  // ── HANDLERS ──
+  function handleSensors(d) {
+    const lux = parseFloat(d.lux) || 0;
+    const pir = parseInt(d.pir) || 0;
+    const now = new Date();
+
+    document.getElementById('luxVal').textContent = lux.toFixed(1);
+    const pct = Math.min(100, (lux / 800) * 100);
+    document.getElementById('luxBar').style.width = pct + '%';
+    document.getElementById('luxDesc').textContent = lux < 50 ? 'Low — lamp may be needed' : lux < 200 ? 'Moderate ambient light' : 'Bright — lamp not needed';
+
+    document.getElementById('pirVal').textContent = pir ? 'Occupied' : 'Empty';
+    document.getElementById('pirDot').className = 'pir-dot' + (pir ? ' active' : '');
+    document.getElementById('pirText').className = 'pir-text' + (pir ? ' active' : '');
+    document.getElementById('pirText').textContent = pir ? 'Motion detected' : 'No motion';
+    document.getElementById('pirSub').textContent = 'PIR sensor reading';
+
+    document.getElementById('lastTime').textContent = now.toTimeString().slice(0,8);
+  }
+
+  function handlePrediction(d) {
+    const prob = parseFloat(d.probability) || 0;
+    const pct = Math.round(prob * 100);
+    document.getElementById('probVal').textContent = pct;
+    document.getElementById('probBar').style.width = pct + '%';
+    document.getElementById('probBar').className = 'prob-fill' + (pct >= 75 ? ' high' : '');
+    document.getElementById('alertBadge').className = 'alert-badge' + (pct >= 75 ? ' visible' : '');
+    document.getElementById('aiSub').textContent = 'Command: ' + d.command + ' · Hour ' + d.hour + ', Day ' + d.day_of_week;
+  }
+
+  function handleControl(cmd) {
+    const isOn = cmd === 'ON';
+    if (isOn === lampOn) return; // Ignore if state is already the same
+    
+    lampOn = isOn;
+    const stateEl = document.getElementById('lampStateText');
+    stateEl.textContent = isOn ? 'ON' : 'OFF';
+    stateEl.className = isOn ? '' : 'off-state';
+
+    if (isOn) { lastLampOnTime = Date.now(); }
+    else if (lastLampOnTime) {
+      lampOnMinutes += (Date.now() - lastLampOnTime) / 60000;
+      lastLampOnTime = null;
+      updateEnergy();
+    }
+  }
+
+  function updateEnergy() {
+    const totalMins = lampOnMinutes + (lampOn && lastLampOnTime ? (Date.now() - lastLampOnTime) / 60000 : 0);
+    const kWh = (WATT * totalMins) / (60 * 1000);
+    const cost = kWh * RS_PER_KWH;
+    document.getElementById('onTime').textContent = Math.round(totalMins) + ' min';
+    document.getElementById('kwh').textContent = kWh.toFixed(4) + ' kWh';
+    document.getElementById('cost').textContent = 'Rs ' + cost.toFixed(2);
+  }
+
+  // ── SEND COMMAND ──
+  function sendCommand(cmd) {
+    if (!mqttClient || !mqttClient.connected) { alert('Not connected to broker'); return; }
+    mqttClient.publish('lamp/control', cmd);
+    handleControl(cmd);
+    addLog('lamp/control', cmd + ' (manual override)');
+  }
+
+  // ── UI HELPERS ──
+  function setConnected(ok) {
+    const badge = document.getElementById('connBadge');
+    badge.textContent = ok ? 'Connected · HiveMQ' : 'Disconnected';
+    badge.className = 'conn-badge ' + (ok ? 'connected' : 'error');
+  }
+
+  function addLog(topic, msg) {
+    const feed = document.getElementById('logFeed');
+    const now = new Date().toTimeString().slice(0,8);
+    const short = msg.length > 80 ? msg.slice(0,80) + '…' : msg;
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const timeSpan = `<span class="log-time">${now}</span>`;
+    const topicSpan = `<span class="log-topic">${topic}</span>`;
+    line.innerHTML = `${timeSpan}${topicSpan}`;
+    line.appendChild(document.createTextNode(short));
+    feed.insertBefore(line, feed.firstChild);
+    if (feed.children.length > 50) feed.removeChild(feed.lastChild);
+  }
+
+  // energy updater every 30s
+  setInterval(updateEnergy, 30000);
+
+  connect();
+</script>
+</body>
+</html>
